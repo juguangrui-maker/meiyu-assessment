@@ -1,0 +1,40 @@
+name: Publish preserved learner release
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing verified release tag
+        required: true
+        default: v2026.11.19-005
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify preserved public package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern site.tar.gz --pattern site.sha256 --pattern site-manifest.json
+          sha256sum --check site.sha256
+          mkdir _site
+          tar --extract --gzip --file site.tar.gz --directory _site
+          python3 verify-site.py _site site-manifest.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy verified static learner site
+        id: deployment
+        uses: actions/deploy-pages@v4
