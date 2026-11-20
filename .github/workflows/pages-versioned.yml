@@ -1,0 +1,43 @@
+name: Publish preserved music v2 alongside v1
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Verified additive release tag
+        required: true
+        default: v2026.11.21-006
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download immutable base and additive package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^[a-z0-9][a-z0-9._-]{0,79}$ ]]
+          mkdir base candidate
+          gh release download v2026.11.19-005 --repo "$GITHUB_REPOSITORY" --dir base --pattern site.tar.gz --pattern site-manifest.json
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir candidate --pattern overlay.tar.gz --pattern overlay.sha256 --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+      - name: Verify every file and preserve the complete old site
+        run: |
+          python3 compose-versioned-pages.py --base-archive base/site.tar.gz --base-manifest base/site-manifest.json --candidate candidate --destination _site
+          python3 verify-site.py _site candidate/site-manifest.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy verified old and new learner versions
+        id: deployment
+        uses: actions/deploy-pages@v4
