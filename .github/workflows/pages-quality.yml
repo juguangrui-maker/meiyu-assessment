@@ -1,0 +1,55 @@
+name: Publish checked music repair for all entries
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Immutable checked learner release
+        required: true
+        default: v2026.11.21-007
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download immutable parent and checked repair
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^[a-z0-9][a-z0-9._-]{0,79}$ ]]
+          mkdir base parent candidate
+          gh release download v2026.11.19-005 --repo "$GITHUB_REPOSITORY" --dir base --pattern site.tar.gz --pattern site-manifest.json
+          gh release download v2026.11.21-006 --repo "$GITHUB_REPOSITORY" --dir parent --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir candidate --pattern overlay.tar.gz --pattern overlay.sha256 --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+      - name: Verify parent, bounded entry changes and every file
+        run: |
+          python3 compose-quality-pages.py --base-archive base/site.tar.gz --base-manifest base/site-manifest.json --parent parent --candidate candidate --destination _site
+          python3 verify-site.py _site candidate/site-manifest.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Wait for Pages artifact registration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 12); do
+            artifact_ready=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length')
+            if [ "$artifact_ready" -gt 0 ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+      - name: Deploy verified learner site
+        id: deployment
+        uses: actions/deploy-pages@v4
