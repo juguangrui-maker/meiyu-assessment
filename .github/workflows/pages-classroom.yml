@@ -1,0 +1,62 @@
+name: Publish verified intuitive classrooms
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Immutable verified classroom release
+        required: true
+        default: v2026.11.23-014
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download preserved learner ancestors
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          test "$RELEASE_TAG" = v2026.11.23-014
+          mkdir -p preserved/v2026.11.19-005 preserved/v2026.11.21-006 preserved/v2026.11.21-007 preserved/v2026.11.23-008 preserved/v2026.11.23-012 candidate tooling
+          gh release download v2026.11.19-005 --dir preserved/v2026.11.19-005 --pattern site.tar.gz --pattern site-manifest.json --pattern path-mapping.json --pattern release-assets.json
+          for tag in v2026.11.21-006 v2026.11.21-007; do
+            gh release download "$tag" --dir "preserved/$tag" --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          done
+          gh release download v2026.11.23-008 --dir preserved/v2026.11.23-008 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json --pattern media-reuse.json
+          gh release download "$RELEASE_TAG" --dir preserved/v2026.11.23-012 --pattern 'parent012-*'
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          for p in Path('preserved/v2026.11.23-012').glob('parent012-*'):
+              p.rename(p.with_name(p.name.removeprefix('parent012-')))
+          PYTHON
+          gh release download "$RELEASE_TAG" --dir candidate --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json --pattern deployment-tooling.tar.gz
+      - name: Verify sealed tooling and complete public site
+        env:
+          TOOLING_SHA: 8e1de7bcb0f35527cc34fcf53ab999896744202094d22ead7fb75ac99c9af356
+          RECEIPT_SHA: 7ea11f96648a0367956ca264c6fc248c852d25b8ef0741d2e77528698f34c8d4
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib, os
+          from pathlib import Path
+          for name, key in [('deployment-tooling.tar.gz','TOOLING_SHA'),('release.json','RECEIPT_SHA')]:
+              assert hashlib.sha256((Path('candidate') / name).read_bytes()).hexdigest() == os.environ[key], name
+          PYTHON
+          tar -xzf candidate/deployment-tooling.tar.gz -C tooling
+          python3 tooling/build_classroom_pages.py compose --pages preserved --candidate candidate --destination _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy verified learner site
+        id: deployment
+        uses: actions/deploy-pages@v4
