@@ -30,16 +30,18 @@ jobs:
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^[a-z0-9][a-z0-9._-]{0,79}$ ]]
           mkdir -p preserved/v2026.11.19-005 preserved/v2026.11.21-006 preserved/v2026.11.21-007 candidate tooling
-          gh release download v2026.11.19-005 --repo "$LEARNER_REPO" --dir preserved/v2026.11.19-005 --pattern site.tar.gz --pattern site-manifest.json --pattern path-mapping.json --pattern release-assets.json
+          gh release download v2026.11.19-005 --repo "$LEARNER_REPO" --dir preserved/v2026.11.19-005 --pattern site.tar.gz --pattern site-manifest.json
           gh release download v2026.11.21-006 --repo "$LEARNER_REPO" --dir preserved/v2026.11.21-006 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
           gh release download v2026.11.21-007 --repo "$LEARNER_REPO" --dir preserved/v2026.11.21-007 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
-          gh release download "$RELEASE_TAG" --repo "$LEARNER_REPO" --dir candidate --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern media-reuse.json --pattern release.json --pattern deployment-tooling.tar.gz
+          gh release download "$RELEASE_TAG" --repo "$LEARNER_REPO" --dir candidate --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern media-reuse.json --pattern release.json --pattern deployment-tooling.tar.gz --pattern preserved-mapping-receipts.tar.gz
       - name: Verify pinned tooling and preserve every previous learner file
         env:
           TOOLING_SHA256: dd6cbb76075b4411486975875b3b34ccc5f6fafe8424eb28f19685b0b525714b
         run: |
           set -euo pipefail
           echo "$TOOLING_SHA256  candidate/deployment-tooling.tar.gz" | sha256sum --check
+          echo "92eb7e2c7c81729fb7f5f7cf1d9aa50efd1f3b441bdc175d71b0bae94e9a75e6  candidate/preserved-mapping-receipts.tar.gz" | sha256sum --check
+          tar --extract --gzip --file candidate/preserved-mapping-receipts.tar.gz --directory preserved
           tar --extract --gzip --file candidate/deployment-tooling.tar.gz --directory tooling
           python3 tooling/build_studio_pages.py --pages preserved compose --candidate candidate --destination _site
       - uses: actions/configure-pages@v5
