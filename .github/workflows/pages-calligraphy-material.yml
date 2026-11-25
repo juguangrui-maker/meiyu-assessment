@@ -1,0 +1,90 @@
+name: Publish verified calligraphy display
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Immutable verified clean calligraphy display
+        required: true
+        default: v2026.11.26-025
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download preserved learner ancestors
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          test "$GITHUB_REPOSITORY" = juguangrui-maker/meiyu-assessment
+          test "$RELEASE_TAG" = v2026.11.26-025
+          mkdir -p preserved/v2026.11.19-005 preserved/v2026.11.21-006 preserved/v2026.11.21-007 preserved/v2026.11.23-008 preserved/v2026.11.23-012 preserved/v2026.11.23-015 preserved/v2026.11.23-016 preserved/v2026.11.23-017 preserved/v2026.11.23-018 preserved/v2026.11.23-019 preserved/v2026.11.24-020 preserved/v2026.11.24-021 preserved/v2026.11.24-022 preserved/v2026.11.24-023 preserved/v2026.11.25-024 candidate tooling
+          gh release download v2026.11.19-005 --dir preserved/v2026.11.19-005 --pattern site.tar.gz --pattern site-manifest.json
+          for tag in v2026.11.21-006 v2026.11.21-007; do
+            gh release download "$tag" --dir "preserved/$tag" --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          done
+          gh release download v2026.11.23-008 --dir preserved/v2026.11.23-008 --pattern preserved-mapping-receipts.tar.gz --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json --pattern media-reuse.json
+          gh release download v2026.11.23-015 --dir preserved/v2026.11.23-012 --pattern 'parent012-*'
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          for p in Path('preserved/v2026.11.23-012').glob('parent012-*'):
+              p.rename(p.with_name(p.name.removeprefix('parent012-')))
+          PYTHON
+          gh release download v2026.11.23-015 --dir preserved/v2026.11.23-015 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.23-016 --dir preserved/v2026.11.23-016 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.23-017 --dir preserved/v2026.11.23-017 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.23-018 --dir preserved/v2026.11.23-018 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.23-019 --dir preserved/v2026.11.23-019 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.24-020 --dir preserved/v2026.11.24-020 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.24-021 --dir preserved/v2026.11.24-021 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.24-022 --dir preserved/v2026.11.24-022 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.24-023 --dir preserved/v2026.11.24-023 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download v2026.11.25-024 --dir preserved/v2026.11.25-024 --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json
+          gh release download "$RELEASE_TAG" --dir candidate --pattern overlay.tar.gz --pattern overlay-manifest.json --pattern site-manifest.json --pattern release.json --pattern deployment-tooling.tar.gz
+      - name: Verify sealed tooling and complete public site
+        env:
+          TOOLING_SHA: d4f9f0b55e0f82558f8add6df54ee83189916e4b1c290f11aff073ed03189e53
+          RECEIPT_SHA: dcbbcb3c5755c460bafc8ca98f946715c99953a2ef527a35c5c5c7998c00312b
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib, os
+          from pathlib import Path
+          for name, key in [('deployment-tooling.tar.gz','TOOLING_SHA'),('release.json','RECEIPT_SHA')]:
+              assert hashlib.sha256((Path('candidate') / name).read_bytes()).hexdigest() == os.environ[key], name
+          PYTHON
+          python3 - <<'PYTHON'
+          import hashlib
+          from pathlib import Path
+          assert hashlib.sha256(Path('preserved/v2026.11.23-008/preserved-mapping-receipts.tar.gz').read_bytes()).hexdigest() == '92eb7e2c7c81729fb7f5f7cf1d9aa50efd1f3b441bdc175d71b0bae94e9a75e6'
+          PYTHON
+          tar -xzf preserved/v2026.11.23-008/preserved-mapping-receipts.tar.gz -C preserved
+          tar -xzf candidate/deployment-tooling.tar.gz -C tooling
+          python3 tooling/build_calligraphy_material_pages.py compose --pages preserved --candidate candidate --destination _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Wait for verified Pages artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            ready=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length')
+            if [ "$ready" -gt 0 ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+      - name: Deploy verified learner site
+        id: deployment
+        uses: actions/deploy-pages@v4
